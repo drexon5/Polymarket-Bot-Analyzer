@@ -1,0 +1,5 @@
+{
+  "name": "PolyTrade Analyzer",
+  "description": "A tool to parse Polymarket trading logs, match them with active/closed positions, identify failed trades, and export a comprehensive CSV report.",
+  "requestFramePermissions": []
+}
