@@ -63,6 +63,9 @@ export interface ProcessedTrade {
   
   // Result
   result?: 'WIN' | 'LOSS' | 'OPEN';
+  
+  // Aggregates
+  totalAttemptedAmount?: number; // Sum of all attempts (failed or success) for this market/trader
 }
 
 export interface TimeSeriesPoint {

@@ -17,7 +17,7 @@ interface TradeTableProps {
   trades: ProcessedTrade[];
 }
 
-type SortKey = keyof ProcessedTrade | 'execAmt' | 'execPrice' | 'latency' | 'signalAmt' | 'market' | 'trader';
+type SortKey = keyof ProcessedTrade | 'execAmt' | 'execPrice' | 'latency' | 'signalAmt' | 'market' | 'trader' | 'totalAttempted';
 type SortDirection = 'asc' | 'desc';
 
 interface ColumnConfig {
@@ -34,7 +34,7 @@ export const TradeTable: React.FC<TradeTableProps> = ({ trades }) => {
   const [hideFailed, setHideFailed] = useState(false);
   const [sortConfig, setSortConfig] = useState<{ key: SortKey; direction: SortDirection }>({ key: 'date', direction: 'desc' });
   const [visibleColumns, setVisibleColumns] = useState<Set<string>>(new Set([
-    'date', 'trader', 'action', 'market', 'signalAmt', 'execAmt', 'price', 'status', 'result', 'pnl', 'latency', 'link'
+    'date', 'trader', 'action', 'market', 'signalAmt', 'totalAttempted', 'execAmt', 'price', 'status', 'result', 'pnl', 'latency', 'link'
   ]));
   const [showColumnSelector, setShowColumnSelector] = useState(false);
 
@@ -77,6 +77,16 @@ export const TradeTable: React.FC<TradeTableProps> = ({ trades }) => {
       label: 'Signal $',
       sortable: true,
       render: (t) => <span className="tabular-nums text-gray-300">${t.amount.toFixed(2)}</span>
+    },
+    {
+      id: 'totalAttempted',
+      label: 'Tot. Attempted',
+      sortable: true,
+      render: (t) => (
+          <span className="tabular-nums text-yellow-500/80 font-medium">
+              {t.totalAttemptedAmount ? `$${t.totalAttemptedAmount.toFixed(0)}` : '-'}
+          </span>
+      )
     },
     {
       id: 'execAmt',
@@ -218,6 +228,7 @@ export const TradeTable: React.FC<TradeTableProps> = ({ trades }) => {
         case 'execPrice': aVal = a.matchedExecutionPrice || 0; bVal = b.matchedExecutionPrice || 0; break;
         case 'latency': aVal = a.latencySeconds || 0; bVal = b.latencySeconds || 0; break;
         case 'signalAmt': aVal = a.amount; bVal = b.amount; break;
+        case 'totalAttempted': aVal = a.totalAttemptedAmount || 0; bVal = b.totalAttemptedAmount || 0; break;
         case 'market': aVal = a.marketTitle; bVal = b.marketTitle; break;
         case 'trader': aVal = a.traderName; bVal = b.traderName; break;
         case 'action': aVal = a.action; bVal = b.action; break;

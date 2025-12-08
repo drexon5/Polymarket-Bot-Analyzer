@@ -182,7 +182,11 @@ export const processTrades = (
 ): ProcessedTrade[] => {
   const processed: ProcessedTrade[] = [];
   const usedActivityIds = new Set<number>();
+  
+  // Track aggregated attempts: Map<"TraderName-MarketSlug", TotalAmount>
+  const attemptsMap = new Map<string, number>();
 
+  // 1. First Pass: Create ProcessedTrade objects
   chatLogs.forEach((log, logIndex) => {
     if (!log.content.match(/(BUY|SELL)/i) && !log.content.includes('http')) return;
     if (log.content.includes('Your Polymarket Portfolio')) return;
@@ -199,6 +203,15 @@ export const processTrades = (
         const details = parseTradeDetails(line, nextLine);
         
         if (!details.marketSlug && !details.marketTitle) continue;
+        
+        const simpleSlug = simplify(details.marketSlug);
+
+        // Accumulate attempts
+        if (simpleSlug) {
+            const key = `${traderName}-${simpleSlug}`;
+            const currentTotal = attemptsMap.get(key) || 0;
+            attemptsMap.set(key, currentTotal + details.amount);
+        }
 
         let matchedStatus: 'Active' | 'Closed' | 'None' = 'None';
         let pnl = undefined;
@@ -213,7 +226,6 @@ export const processTrades = (
         let result: 'WIN' | 'LOSS' | 'OPEN' | undefined = undefined;
 
         if (details.status === TradeStatus.SUCCESS) {
-            const simpleSlug = simplify(details.marketSlug);
             const simpleSide = details.action.toUpperCase();
             const simpleOutcome = simplify(details.outcome); // e.g. "yes" or "no"
 
@@ -403,6 +415,18 @@ export const processTrades = (
         });
     }
   });
+  
+  // 2. Second Pass: Assign Total Attempts
+  processed.forEach(trade => {
+      if (trade.marketSlug) {
+          const simpleSlug = simplify(trade.marketSlug);
+          const key = `${trade.traderName}-${simpleSlug}`;
+          const total = attemptsMap.get(key);
+          if (total) {
+              trade.totalAttemptedAmount = total;
+          }
+      }
+  });
 
   return processed;
 };
@@ -414,6 +438,7 @@ export const exportToCSV = (trades: ProcessedTrade[]) => {
     Action: t.action,
     Outcome: t.outcome,
     'Signal Amount': t.amount,
+    'Total Attempted': t.totalAttemptedAmount || '',
     'Exec Amount': t.matchedExecutionAmount || '',
     'Exec Price': t.matchedExecutionPrice || '',
     'Shares': t.shares || '',
