@@ -40,6 +40,23 @@ export const calculateAnalytics = (trades: ProcessedTrade[]): AnalyticsResult =>
         const bestTrade = Math.max(...tTrades.map(t => t.pnl || 0));
         const worstTrade = Math.min(...tTrades.map(t => t.pnl || 0));
 
+        // Calculate Sharpe Ratio (based on per-trade ROI)
+        // ROI = PnL / Investment. 
+        // We use matchedExecutionAmount as investment. Fallback to 'amount' (signal amount) if missing.
+        const returns = tTrades.map(t => {
+            const invested = t.matchedExecutionAmount || t.amount || 0;
+            if (invested <= 0) return 0;
+            return (t.pnl || 0) / invested;
+        });
+        
+        let sharpeRatio = 0;
+        if (returns.length > 1) {
+            const avgReturn = returns.reduce((a, b) => a + b, 0) / returns.length;
+            const variance = returns.reduce((a, b) => a + Math.pow(b - avgReturn, 2), 0) / returns.length;
+            const stdDev = Math.sqrt(variance);
+            sharpeRatio = stdDev === 0 ? 0 : avgReturn / stdDev;
+        }
+
         // Avg Holding Time (Heuristic: ClosedDate - TradeDate)
         let totalHoldHours = 0;
         let holdCount = 0;
@@ -62,18 +79,25 @@ export const calculateAnalytics = (trades: ProcessedTrade[]): AnalyticsResult =>
         const daysDiff = Math.max(1, (maxDate - minDate) / (1000 * 60 * 60 * 24));
         const avgTradesPerDay = tTrades.length / daysDiff;
 
+        // Favorite Category
+        const sportCount = tTrades.filter(t => t.category === 'Sport').length;
+        const nonSportCount = tTrades.filter(t => t.category === 'Non-Sport').length;
+        const favoriteCategory = sportCount >= nonSportCount ? 'Sport' : 'Non-Sport';
+
         return {
             name: trader,
             totalPnl,
             winRate,
             profitFactor,
+            sharpeRatio,
             avgHoldingTimeHours,
             longShortRatio,
             avgTradesPerDay,
             totalAttempts: attemptsByTrader[trader] || 0,
             bestTrade,
             worstTrade,
-            avgSuccessfulBet: avgBet // Using executed amount as proxy
+            avgSuccessfulBet: avgBet, // Using executed amount as proxy
+            favoriteCategory
         };
     });
 

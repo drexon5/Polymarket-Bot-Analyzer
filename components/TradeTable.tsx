@@ -34,7 +34,7 @@ export const TradeTable: React.FC<TradeTableProps> = ({ trades }) => {
   const [hideFailed, setHideFailed] = useState(false);
   const [sortConfig, setSortConfig] = useState<{ key: SortKey; direction: SortDirection }>({ key: 'date', direction: 'desc' });
   const [visibleColumns, setVisibleColumns] = useState<Set<string>>(new Set([
-    'date', 'trader', 'action', 'market', 'signalAmt', 'totalAttempted', 'execAmt', 'price', 'status', 'result', 'pnl', 'latency', 'link'
+    'date', 'trader', 'category', 'action', 'market', 'signalAmt', 'totalAttempted', 'execAmt', 'price', 'status', 'result', 'pnl', 'latency', 'link'
   ]));
   const [showColumnSelector, setShowColumnSelector] = useState(false);
 
@@ -51,6 +51,20 @@ export const TradeTable: React.FC<TradeTableProps> = ({ trades }) => {
       label: 'Trader',
       sortable: true,
       render: (t) => <span className="font-medium text-white">{t.traderName}</span>
+    },
+    {
+      id: 'category',
+      label: 'Cat',
+      sortable: true,
+      render: (t) => (
+        <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wide border ${
+            t.category === 'Sport' 
+            ? 'bg-orange-500/10 text-orange-400 border-orange-500/20' 
+            : 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20'
+        }`}>
+            {t.category === 'Sport' ? 'Sport' : 'Other'}
+        </span>
+      )
     },
     {
       id: 'market',
@@ -215,7 +229,8 @@ export const TradeTable: React.FC<TradeTableProps> = ({ trades }) => {
         t.traderName.toLowerCase().includes(lower) ||
         t.marketTitle.toLowerCase().includes(lower) ||
         t.action.toLowerCase().includes(lower) ||
-        t.outcome.toLowerCase().includes(lower)
+        t.outcome.toLowerCase().includes(lower) ||
+        t.category.toLowerCase().includes(lower)
       );
     }
 
@@ -233,6 +248,7 @@ export const TradeTable: React.FC<TradeTableProps> = ({ trades }) => {
         case 'trader': aVal = a.traderName; bVal = b.traderName; break;
         case 'action': aVal = a.action; bVal = b.action; break;
         case 'result': aVal = a.result || ''; bVal = b.result || ''; break;
+        case 'category': aVal = a.category; bVal = b.category; break;
         default: aVal = a[sortConfig.key as keyof ProcessedTrade] || 0; bVal = b[sortConfig.key as keyof ProcessedTrade] || 0;
       }
 

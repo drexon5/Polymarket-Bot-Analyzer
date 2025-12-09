@@ -47,6 +47,46 @@ const transformHeader = (header: string) => {
   return h;
 };
 
+// Sport keyword detection
+const detectCategory = (title: string, slug: string): 'Sport' | 'Non-Sport' => {
+  const t = (title || '').toLowerCase();
+  const s = (slug || '').toLowerCase();
+  
+  const sportsKeywords = [
+    'nba', 'nfl', 'mlb', 'nhl', 'ufc', 'mma', 'boxing', // Leagues/Combat
+    'tennis', 'soccer', 'football', 'basketball', 'baseball', 'hockey', 'cricket', 'rugby', 'golf', 'volleyball', // Sport names
+    'f1', 'formula 1', 'grand prix', 'nascar', // Racing
+    'premier league', 'champions league', 'la liga', 'serie a', 'bundesliga', 'ligue 1', // Soccer leagues
+    'wimbledon', 'us open', 'french open', 'australian open', // Tennis
+    'super bowl', 'world series', 'stanley cup', // Finals
+    'olympics', 'medal', // Events
+    'touchdown', 'goals', 'points', 'rebounds', 'assists', // Stat markets
+    'over/under', 'o/u' // Betting terms
+  ];
+
+  if (sportsKeywords.some(k => t.includes(k) || s.includes(k))) {
+    return 'Sport';
+  }
+
+  // VS logic: " vs ", " vs. ", " v. ", " v ", "-vs-", "-v-"
+  if (
+    /\bvs\.?\b/.test(t) || // Matches "vs" or "vs." as a whole word
+    /\bv\.\s/.test(t) ||   // Matches "v. "
+    /\bv\s/.test(t) ||     // Matches "v "
+    s.includes('-vs-') ||
+    s.includes('-v-')
+  ) {
+    return 'Sport';
+  }
+
+  // "Will X win on Y" pattern (e.g., "Will Real Madrid win on 2025-12")
+  if (/will .*win on/i.test(t)) {
+      return 'Sport';
+  }
+
+  return 'Non-Sport';
+};
+
 export const parseInputData = (portfolioCsv: string, chatCsv: string) => {
   const parseOptions = {
     header: true,
@@ -143,6 +183,7 @@ const parseTradeDetails = (line: string, nextLine: string | undefined) => {
       if (simpleMatch) result.outcome = simpleMatch[2].trim();
   }
 
+  // 1. Try Markdown Link: [Title](URL)
   const linkRegex = /\[([^\]]+)\]\((https:\/\/polymarket\.com\/(?:market|event)\/([^)\s]+))\)/;
   const linkMatch = line.match(linkRegex);
 
@@ -153,6 +194,21 @@ const parseTradeDetails = (line: string, nextLine: string | undefined) => {
     if (extractedSlug.includes('?')) extractedSlug = extractedSlug.split('?')[0];
     if (extractedSlug.includes('#')) extractedSlug = extractedSlug.split('#')[0];
     result.marketSlug = extractedSlug;
+  } 
+  else {
+    // 2. Try Raw URL: https://polymarket.com/event/slug
+    const rawUrlRegex = /(https:\/\/polymarket\.com\/(?:market|event)\/([a-zA-Z0-9-?=&]+))/;
+    const rawMatch = line.match(rawUrlRegex);
+    
+    if (rawMatch) {
+        result.marketUrl = rawMatch[1];
+        let extractedSlug = rawMatch[2];
+        if (extractedSlug.includes('?')) extractedSlug = extractedSlug.split('?')[0];
+        if (extractedSlug.includes('#')) extractedSlug = extractedSlug.split('#')[0];
+        result.marketSlug = extractedSlug;
+        // Construct a fallback title from slug since raw URL doesn't have title text
+        result.marketTitle = result.marketSlug.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    }
   }
 
   if (line.includes('⏭️') || line.includes('✗')) {
@@ -205,6 +261,7 @@ export const processTrades = (
         if (!details.marketSlug && !details.marketTitle) continue;
         
         const simpleSlug = simplify(details.marketSlug);
+        const category = detectCategory(details.marketTitle, details.marketSlug);
 
         // Accumulate attempts
         if (simpleSlug) {
@@ -228,12 +285,34 @@ export const processTrades = (
         if (details.status === TradeStatus.SUCCESS) {
             const simpleSide = details.action.toUpperCase();
             const simpleOutcome = simplify(details.outcome); // e.g. "yes" or "no"
-
             const tradeTime = logDate.getTime() / 1000;
 
             let bestActivityIndex = -1;
             let minTimeDiff = 3600; // Allow 1 hour window
 
+            // Helper for position matching that can be reused in both activity match and fallback
+            const createPositionMatcher = (matchAssetId?: string) => (p: PortfolioRow) => {
+                const pSlug = simplify(p.slug);
+                const pOutcome = simplify(p.outcome);
+                
+                // 1. Asset Match (Strongest)
+                if (matchAssetId && p.asset === matchAssetId) return true;
+
+                // 2. Slug Match (Weaker) - Must also check Outcome
+                if (p.slug && (pSlug.includes(simpleSlug) || simpleSlug.includes(pSlug))) {
+                    // If outcomes are defined, they MUST match
+                    if (pOutcome && simpleOutcome) {
+                        if (pOutcome === simpleOutcome) return true;
+                        // If mismatched outcomes, return false
+                        return false; 
+                    }
+                    // If outcome is missing in position row, we assume match (risky but needed fallback)
+                    return true;
+                }
+                return false;
+            };
+
+            // Attempt to find activity history first
             activityHistory.forEach((h, idx) => {
                 if (usedActivityIds.has(idx)) return;
                 
@@ -262,6 +341,7 @@ export const processTrades = (
             });
 
             if (bestActivityIndex !== -1) {
+                // --- EXACT MATCH FOUND IN ACTIVITY HISTORY ---
                 usedActivityIds.add(bestActivityIndex);
                 const activityMatch = activityHistory[bestActivityIndex];
                 
@@ -280,29 +360,9 @@ export const processTrades = (
                 }
 
                 const assetId = activityMatch.asset;
-
-                // --- MATCHING ACTIVE OR CLOSED POSITION ---
-                const isMatchingPosition = (p: PortfolioRow) => {
-                    const pSlug = simplify(p.slug);
-                    const pOutcome = simplify(p.outcome);
-                    
-                    // 1. Asset Match (Strongest)
-                    if (assetId && p.asset === assetId) return true;
-
-                    // 2. Slug Match (Weaker) - Must also check Outcome
-                    if (p.slug && (pSlug.includes(simpleSlug) || simpleSlug.includes(pSlug))) {
-                        // If outcomes are defined, they MUST match
-                        if (pOutcome && simpleOutcome) {
-                            if (pOutcome === simpleOutcome) return true;
-                            // If mismatched outcomes, return false
-                            return false; 
-                        }
-                        // If outcome is missing in position row, we assume match (risky but needed fallback)
-                        return true;
-                    }
-                    return false;
-                };
+                const isMatchingPosition = createPositionMatcher(assetId);
                 
+                // Check Active Positions
                 const activePos = activePositions.find(isMatchingPosition);
                 
                 if (activePos) {
@@ -312,17 +372,19 @@ export const processTrades = (
                     const currentPrice = activePos.price || (activePos.currentValue && activePos.size ? activePos.currentValue / activePos.size : 0);
                     pnl = (currentPrice - entryPrice) * tradeShares;
                     currentValue = currentPrice * tradeShares;
+                    
+                    // Backfill URL if missing
+                    if (!details.marketUrl && activePos.slug) {
+                        details.marketUrl = `https://polymarket.com/event/${activePos.slug}`;
+                    }
                 } else {
+                    // Check Closed Positions
                     const closedPos = closedPositions.find(isMatchingPosition);
                     if (closedPos) {
                         matchedStatus = 'Closed';
                         if (closedPos.date) closedDate = closedPos.date;
 
-                        // PnL Logic for Closed/Settled Positions:
-                        // 1. Prefer explicit settlement price (curPrice) which is usually 0 or 1.
-                        // 2. Fallback to Price if available.
-                        // 3. Fallback to Realized PnL to deduce direction.
-                        
+                        // PnL Logic for Closed/Settled Positions
                         let exitPrice = 0;
                         const posCurPrice = closedPos.curPrice;
                         const posPrice = closedPos.price;
@@ -350,12 +412,11 @@ export const processTrades = (
                                 exitPrice = 0;
                                 result = 'LOSS';
                             } else {
-                                // Ambiguous ratio? Fallback to PnL
                                 exitPrice = realizedPnl > 0 ? 1 : 0;
                                 result = realizedPnl > 0 ? 'WIN' : 'LOSS';
                             }
                         }
-                        // Priority 4: Fallback to PnL (Weakest but often correct for settled)
+                        // Priority 4: Fallback to PnL
                         else {
                             if (realizedPnl > 0) {
                                 exitPrice = 1; 
@@ -368,23 +429,68 @@ export const processTrades = (
 
                         pnl = (exitPrice - entryPrice) * tradeShares;
                         currentValue = exitPrice * tradeShares;
+
+                        // Backfill URL if missing
+                        if (!details.marketUrl && closedPos.slug) {
+                            details.marketUrl = `https://polymarket.com/event/${closedPos.slug}`;
+                        }
                     }
                 }
             } else {
-                // Inferred Position Match if no activity found
-                const posMatch = activePositions.find(p => {
-                    const pSlug = simplify(p.slug);
-                    const pOutcome = simplify(p.outcome);
-                    return pSlug.includes(simpleSlug) && (!pOutcome || !simpleOutcome || pOutcome === simpleOutcome);
-                });
+                // --- INFERRED POSITION MATCH (NO ACTIVITY LOG FOUND) ---
+                // This happens if the user traded but the activity log is missing or time gap is too large.
+                // We attempt to find the position in Active OR Closed lists by Slug/Outcome.
+                
+                const isMatchingPosition = createPositionMatcher(undefined); // No asset ID to match
 
-                if (posMatch) {
+                const activePos = activePositions.find(isMatchingPosition);
+
+                if (activePos) {
                     matchedStatus = 'Active';
                     matchConfidence = 'Inferred (Position)';
                     result = 'OPEN';
+                    // We can't calculate exact PnL without entry price from Activity, 
+                    // but we can try using "Average Price" from the active position row if available
+                    if (activePos.avgPrice && activePos.currentValue && activePos.size) {
+                         const entryPx = activePos.avgPrice;
+                         const currPx = activePos.price || (activePos.currentValue / activePos.size);
+                         pnl = (currPx - entryPx) * activePos.size;
+                         shares = activePos.size;
+                         
+                         // Fill execution stats for analytics
+                         matchedExecutionPrice = entryPx;
+                         matchedExecutionAmount = activePos.size * entryPx;
+                    }
+
+                    // Backfill URL if missing
+                    if (!details.marketUrl && activePos.slug) {
+                        details.marketUrl = `https://polymarket.com/event/${activePos.slug}`;
+                    }
                 } else {
-                     details.status = TradeStatus.MISSING;
-                     details.failureReason = 'No execution matched';
+                     // Check Closed Positions (New Logic)
+                     const closedPos = closedPositions.find(isMatchingPosition);
+                     if (closedPos) {
+                         matchedStatus = 'Closed';
+                         matchConfidence = 'Inferred (Position)';
+                         if (closedPos.date) closedDate = closedPos.date;
+                         if (closedPos.size) shares = closedPos.size;
+                         
+                         // If we inferred a closed position, we likely don't know the exact entry price from this specific trade.
+                         // However, the Closed Position row usually contains the 'Realized PnL' for that position.
+                         // We will use that as the best proxy.
+                         if (closedPos.realizedPnl !== undefined) {
+                             pnl = closedPos.realizedPnl;
+                             result = pnl > 0 ? 'WIN' : 'LOSS';
+                         }
+
+                         // Backfill URL if missing
+                         if (!details.marketUrl && closedPos.slug) {
+                             details.marketUrl = `https://polymarket.com/event/${closedPos.slug}`;
+                         }
+                     } else {
+                         details.status = TradeStatus.MISSING;
+                         details.failureReason = 'No execution matched';
+                     }
                 }
             }
         }
@@ -402,6 +508,7 @@ export const processTrades = (
             marketUrl: details.marketUrl,
             status: details.status,
             failureReason: details.failureReason,
+            category: category,
             matchedPositionStatus: matchedStatus,
             pnl: pnl,
             currentValue: currentValue,
@@ -437,6 +544,7 @@ export const exportToCSV = (trades: ProcessedTrade[]) => {
     Trader: t.traderName,
     Action: t.action,
     Outcome: t.outcome,
+    Category: t.category,
     'Signal Amount': t.amount,
     'Total Attempted': t.totalAttemptedAmount || '',
     'Exec Amount': t.matchedExecutionAmount || '',

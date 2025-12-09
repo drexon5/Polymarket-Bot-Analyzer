@@ -46,6 +46,9 @@ export interface ProcessedTrade {
   status: TradeStatus;
   failureReason?: string;
   
+  // Categorization
+  category: 'Sport' | 'Non-Sport';
+
   // Matching Details
   matchedTxHash?: string;
   matchedExecutionPrice?: number;
@@ -81,6 +84,7 @@ export interface TraderStats {
   totalPnl: number;
   winRate: number;
   profitFactor: number;
+  sharpeRatio: number;
   avgHoldingTimeHours: number;
   longShortRatio: number; // Ratio of Yes vs No bets
   avgTradesPerDay: number;
@@ -88,6 +92,7 @@ export interface TraderStats {
   bestTrade: number;
   worstTrade: number;
   avgSuccessfulBet: number;
+  favoriteCategory: string; // 'Sport' or 'Non-Sport'
 }
 
 export interface AnalyticsResult {
